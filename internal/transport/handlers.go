@@ -12,23 +12,24 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/nasermirzaei89/core/internal/core"
 	"github.com/nasermirzaei89/core/internal/repository"
+	"github.com/nasermirzaei89/core/lib/problem"
+	"github.com/nasermirzaei89/core/lib/respond"
 	"github.com/pkg/errors"
 )
 
-type HTTPError struct {
-	Message string `json:"message"`
-	Error   string `json:"error,omitempty"`
-}
-
 func (h *Handler) CreateItemHandler() http.HandlerFunc {
+	type Response struct {
+		respond.WithStatusCreated
+		core.Item
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		pc := pluralize.NewClient()
 
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -36,8 +37,7 @@ func (h *Handler) CreateItemHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type field is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type field is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
@@ -46,22 +46,19 @@ func (h *Handler) CreateItemHandler() http.HandlerFunc {
 
 		err := json.NewDecoder(r.Body).Decode(&req)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on decode request body", Error: err.Error()})
+			respond.Done(w, r, problem.BadRequest("error on decode request body", problem.WithExtension("error", err.Error())))
 
 			return
 		}
 
 		if req.Name == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "name field is required"})
+			respond.Done(w, r, problem.BadRequest("name field is required"))
 
 			return
 		}
 
 		if !isValidName(req.Name) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("name field is not valid, it should an string that matches the regex '%s'", core.NameRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("name field is not valid, it should an string that matches the regex '%s'", core.NameRegex)))
 
 			return
 		}
@@ -69,14 +66,12 @@ func (h *Handler) CreateItemHandler() http.HandlerFunc {
 		_, err = h.itemRepo.GetByTypeAndName(r.Context(), typ, req.Name)
 		if err != nil {
 			if !errors.Is(err, repository.ErrItemNotFound) {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on find item by type and name from the repository", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on find item by type and name from the repository")))
 
 				return
 			}
 		} else {
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("%s with name '%s' already exists", typ, req.Name)})
+			respond.Done(w, r, problem.Conflict(fmt.Sprintf("%s with name '%s' already exists", typ, req.Name)))
 
 			return
 		}
@@ -94,14 +89,14 @@ func (h *Handler) CreateItemHandler() http.HandlerFunc {
 
 		err = h.itemRepo.Insert(r.Context(), item)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on insert item to the repository", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on insert item to the repository")))
 
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(item)
+		rsp := Response{Item: item}
+
+		respond.Done(w, r, rsp)
 	}
 }
 
@@ -112,8 +107,7 @@ func (h *Handler) ListItemsHandler() http.HandlerFunc {
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -121,23 +115,21 @@ func (h *Handler) ListItemsHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type field is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type field is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
 
 		items, err := h.itemRepo.ListByType(r.Context(), typ)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on list items by type from the repository", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on list items by type from the repository")))
 
 			return
 		}
 
 		rsp := core.ItemList{Items: items}
 
-		_ = json.NewEncoder(w).Encode(rsp)
+		respond.Done(w, r, rsp)
 	}
 }
 
@@ -148,8 +140,7 @@ func (h *Handler) ReadItemHandler() http.HandlerFunc {
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -157,8 +148,7 @@ func (h *Handler) ReadItemHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
@@ -166,8 +156,7 @@ func (h *Handler) ReadItemHandler() http.HandlerFunc {
 		name := mux.Vars(r)["name"]
 
 		if !isValidName(name) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)))
 
 			return
 		}
@@ -176,17 +165,15 @@ func (h *Handler) ReadItemHandler() http.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, repository.ErrItemNotFound):
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("%s with name '%s' not found", typ, name)})
+				respond.Done(w, r, problem.NotFound(fmt.Sprintf("%s with name '%s' not found", typ, name)))
 			default:
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on find item by type and name from the repository", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on find item by type and name from the repository")))
 			}
 
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(item)
+		respond.Done(w, r, item)
 	}
 }
 
@@ -197,8 +184,7 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -206,8 +192,7 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
@@ -215,8 +200,7 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 		name := mux.Vars(r)["name"]
 
 		if !isValidName(name) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)))
 
 			return
 		}
@@ -225,8 +209,7 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 
 		err := json.NewDecoder(r.Body).Decode(&req)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on decode request body", Error: err.Error()})
+			respond.Done(w, r, problem.BadRequest("error on decode request body", problem.WithExtension("error", err.Error())))
 
 			return
 		}
@@ -234,11 +217,9 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 		item, err := h.itemRepo.GetByTypeAndName(r.Context(), typ, name)
 		if err != nil {
 			if errors.Is(err, repository.ErrItemNotFound) {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("%s with name '%s' not found", typ, name)})
+				respond.Done(w, r, problem.NotFound(fmt.Sprintf("%s with name '%s' not found", typ, name)))
 			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on find item by type and name from the repository", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on find item by type and name from the repository")))
 			}
 
 			return
@@ -249,13 +230,12 @@ func (h *Handler) ReplaceItemHandler() http.HandlerFunc {
 
 		err = h.itemRepo.Replace(r.Context(), item.UUID, *item)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on replace item in the repository", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on replace item in the repository")))
 
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(*item)
+		respond.Done(w, r, *item)
 	}
 }
 
@@ -266,8 +246,7 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -275,8 +254,7 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
@@ -284,8 +262,7 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 		name := mux.Vars(r)["name"]
 
 		if !isValidName(name) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)))
 
 			return
 		}
@@ -293,11 +270,9 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 		item, err := h.itemRepo.GetByTypeAndName(r.Context(), typ, name)
 		if err != nil {
 			if errors.Is(err, repository.ErrItemNotFound) {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("%s with name '%s' not found", typ, name)})
+				respond.Done(w, r, problem.NotFound(fmt.Sprintf("%s with name '%s' not found", typ, name)))
 			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on find item by type and name from the repository", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on find item by type and name from the repository")))
 			}
 
 			return
@@ -305,16 +280,14 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 
 		originalBytes, err := json.Marshal(item)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on marshal original item", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on marshal original item")))
 
 			return
 		}
 
 		requestBody, err := io.ReadAll(r.Body)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on read request body", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on read request body")))
 
 			return
 		}
@@ -327,30 +300,26 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 		case "application/json-patch+json":
 			patch, err := jsonpatch.DecodePatch(requestBody)
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on decode json patch", Error: err.Error()})
+				respond.Done(w, r, problem.BadRequest("error on decode json patch", problem.WithExtension("error", err.Error())))
 
 				return
 			}
 
 			modifiedBytes, err = patch.Apply(originalBytes)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on apply json patch", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on apply json patch")))
 
 				return
 			}
 		case "application/merge-patch+json":
 			modifiedBytes, err = jsonpatch.MergePatch(originalBytes, requestBody)
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on apply merge patch", Error: err.Error()})
+				respond.Done(w, r, problem.BadRequest("error on apply merge patch", problem.WithExtension("error", err.Error())))
 
 				return
 			}
 		default:
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "unsupported Content-Type header", Error: err.Error()})
+			respond.Done(w, r, problem.BadRequest("unsupported Content-Type header"))
 
 			return
 		}
@@ -359,8 +328,7 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 
 		err = json.Unmarshal(modifiedBytes, &modified)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on unmarshal modified bytes", Error: err.Error()})
+			respond.Done(w, r, problem.BadRequest("error on unmarshal modified bytes", problem.WithExtension("error", err.Error())))
 
 			return
 		}
@@ -370,13 +338,12 @@ func (h *Handler) PatchItemHandler() http.HandlerFunc {
 
 		err = h.itemRepo.Replace(r.Context(), item.UUID, *item)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on replace item in the repository", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on replace item in the repository")))
 
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(*item)
+		respond.Done(w, r, *item)
 	}
 }
 
@@ -387,8 +354,7 @@ func (h *Handler) DeleteItemHandler() http.HandlerFunc {
 		typePlural := mux.Vars(r)["typePlural"]
 
 		if !pc.IsPlural(typePlural) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "you should set plural form of the type"})
+			respond.Done(w, r, problem.BadRequest("you should set plural form of the type"))
 
 			return
 		}
@@ -396,8 +362,7 @@ func (h *Handler) DeleteItemHandler() http.HandlerFunc {
 		typ := pc.Singular(typePlural)
 
 		if !isValidType(typ) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("type parameter is not valid, it should an string that matches the regex '%s'", core.TypeRegex)))
 
 			return
 		}
@@ -405,8 +370,7 @@ func (h *Handler) DeleteItemHandler() http.HandlerFunc {
 		name := mux.Vars(r)["name"]
 
 		if !isValidName(name) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)})
+			respond.Done(w, r, problem.BadRequest(fmt.Sprintf("name parameter is not valid, it should an string that matches the regex '%s'", core.NameRegex)))
 
 			return
 		}
@@ -414,11 +378,9 @@ func (h *Handler) DeleteItemHandler() http.HandlerFunc {
 		item, err := h.itemRepo.GetByTypeAndName(r.Context(), typ, name)
 		if err != nil {
 			if errors.Is(err, repository.ErrItemNotFound) {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: fmt.Sprintf("%s with name '%s' not found", typ, name)})
+				respond.Done(w, r, problem.NotFound(fmt.Sprintf("%s with name '%s' not found", typ, name)))
 			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on find item by type and name from the repository", Error: err.Error()})
+				respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on find item by type and name from the repository")))
 			}
 
 			return
@@ -426,12 +388,11 @@ func (h *Handler) DeleteItemHandler() http.HandlerFunc {
 
 		err = h.itemRepo.Delete(r.Context(), item.UUID)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(HTTPError{Message: "error on delete item from the repository", Error: err.Error()})
+			respond.Done(w, r, problem.InternalServerError(errors.Wrap(err, "error on delete item from the repository")))
 
 			return
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+		respond.Done(w, r, nil)
 	}
 }
