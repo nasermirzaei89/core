@@ -13,7 +13,7 @@ import (
 	"github.com/nasermirzaei89/core/internal/core"
 	"github.com/nasermirzaei89/core/internal/repository"
 	"github.com/nasermirzaei89/core/lib/problem"
-	"github.com/nasermirzaei89/core/lib/respond"
+	"github.com/nasermirzaei89/respond"
 	"github.com/pkg/errors"
 )
 
